@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>442 進攻型再平衡助手</title>
+    <title>動態再平衡助手 (封閉系統)</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel CDNs -->
@@ -34,7 +34,7 @@
         ];
 
         const App = () => {
-            // 初始化資產列表 (預設為 442 進攻型配置)
+            // 初始化資產列表 (預設 442 進攻型)
             const [assets, setAssets] = useState([
                 { 
                     id: 1, type: 'single', label: '00662 (核心)', value: '', target: 40, theme: COLORS[0], locked: true 
@@ -77,12 +77,12 @@
                 setAssets(assets.map(a => a.id === id ? { ...a, locked: !a.locked } : a));
             };
 
-            // 更新一般標的或群組目標
+            // 更新標的
             const updateAsset = (id, field, val) => {
                 setAssets(assets.map(a => a.id === id ? { ...a, [field]: val } : a));
             };
 
-            // 更新群組內的子標的
+            // 更新子標的
             const updateSubAsset = (parentId, subId, field, val) => {
                 setAssets(assets.map(a => {
                     if (a.id !== parentId) return a;
@@ -93,7 +93,7 @@
                 }));
             };
 
-            // 計算核心邏輯
+            // 計算核心邏輯 (封閉系統演算法)
             const report = useMemo(() => {
                 // 1. 計算總資產
                 let totalWealth = 0;
@@ -107,46 +107,70 @@
                     }
                 });
 
-                // 2. 計算總目標比例
+                // 2. 計算總目標比例 (僅供參考與警告)
                 const totalTargetRatio = assets.reduce((sum, a) => sum + (parseFloat(a.target) || 0), 0);
                 const isRatioValid = Math.abs(totalTargetRatio - 100) < 0.1;
 
                 if (totalWealth <= 0) return { isValid: isRatioValid, totalTargetRatio, totalWealth, data: [], actions: [] };
 
-                // 3. 計算每個項目的數據
-                const data = assets.map(asset => {
+                // 3. 第一階段：識別「固定資產」與「可變資產」
+                let fixedWealth = 0; 
+                let variableTargetSum = 0;
+
+                const preCalcData = assets.map(asset => {
                     let currentVal = 0;
                     if (asset.type === 'single') {
                         currentVal = parseFloat(asset.value) || 0;
                     } else {
                         currentVal = asset.subAssets.reduce((sum, s) => sum + (parseFloat(s.value) || 0), 0);
                     }
-
-                    const targetRatio = (parseFloat(asset.target) || 0) / 100;
-                    const targetAmount = totalWealth * targetRatio;
-                    let diff = targetAmount - currentVal;
-                    let isLockedPreventSell = false;
-
-                    // *** 鎖定邏輯 ***
-                    // 如果已鎖定(locked=true) 且 應調整金額為負(diff < 0, 即建議賣出)
-                    // 則強制不賣出 (diff = 0)
-                    if (asset.locked && diff < 0) {
-                        diff = 0;
-                        isLockedPreventSell = true;
-                    }
                     
+                    const rawTargetRatio = (parseFloat(asset.target) || 0) / 100;
+                    const idealTargetAmount = totalWealth * rawTargetRatio;
+                    
+                    // 判定是否為「超標鎖定」狀態
+                    const isOverweightLocked = asset.locked && (currentVal > idealTargetAmount);
+
+                    return { ...asset, currentVal, rawTargetRatio, isOverweightLocked };
+                });
+
+                preCalcData.forEach(a => {
+                    if (a.isOverweightLocked) {
+                        fixedWealth += a.currentVal;
+                    } else {
+                        variableTargetSum += parseFloat(a.target) || 0;
+                    }
+                });
+
+                const remainingWealth = totalWealth - fixedWealth;
+
+                // 4. 第二階段：計算最終目標與差額
+                const data = preCalcData.map(asset => {
+                    let finalTargetAmount = 0;
+                    let finalTargetRatio = 0;
+
+                    if (asset.isOverweightLocked) {
+                        finalTargetAmount = asset.currentVal;
+                        finalTargetRatio = asset.currentVal / totalWealth;
+                    } else {
+                        const relativeWeight = variableTargetSum > 0 ? (parseFloat(asset.target) || 0) / variableTargetSum : 0;
+                        finalTargetAmount = remainingWealth * relativeWeight;
+                        finalTargetRatio = finalTargetAmount / totalWealth;
+                    }
+
+                    const diff = finalTargetAmount - asset.currentVal;
+
                     return {
                         ...asset,
-                        currentVal,
-                        currentRatio: currentVal / totalWealth,
-                        targetRatio,
-                        targetAmount,
+                        currentRatio: asset.currentVal / totalWealth,
+                        targetAmount: finalTargetAmount,
+                        finalTargetRatio, 
                         diff,
-                        isLockedPreventSell
+                        isLockedPreventSell: asset.isOverweightLocked
                     };
                 });
 
-                // 4. 產生建議路徑 (先賣後買)
+                // 5. 產生建議路徑 (先賣後買)
                 let actions = [];
                 const sellActions = [];
                 const buyActions = [];
@@ -155,7 +179,6 @@
                     const subject = info.type === 'group' ? `${info.label} (總和)` : info.label;
                     
                     if (info.isLockedPreventSell) {
-                        // 鎖定不賣出，不產生動作，但可以在介面上顯示狀態
                     } else if (info.diff < -1) {
                         const amount = Math.abs(Math.round(info.diff)).toLocaleString();
                         sellActions.push(`賣出/提領 ${subject}：$${amount}`);
@@ -185,8 +208,8 @@
                                 442
                             </div>
                             <div>
-                                <h1 className="text-lg font-bold text-white tracking-tight">進攻型再平衡</h1>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">40/40/20 Strategy</p>
+                                <h1 className="text-lg font-bold text-white tracking-tight">封閉式再平衡</h1>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Closed System Logic</p>
                             </div>
                         </div>
                         {report.totalWealth > 0 && (
@@ -204,7 +227,7 @@
                             <div className="flex justify-between items-end px-1">
                                 <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">投資組合配置</h2>
                                 <span className={`text-[10px] px-2 py-1 rounded-full border transition-all duration-300 ${report.isValid ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : 'text-rose-400 border-rose-500/50 bg-rose-500/10 animate-pulse'}`}>
-                                    總比例: {report.totalTargetRatio}% {report.isValid ? '✅' : '(需為 100%)'}
+                                    目標總計: {report.totalTargetRatio}% {report.isValid ? '✅' : '(需為 100%)'}
                                 </span>
                             </div>
                             
@@ -250,7 +273,7 @@
                                                 <span className="absolute right-1 top-1.5 text-[10px] text-slate-500 pointer-events-none">%</span>
                                             </div>
 
-                                            {/* 刪除按鈕 (未鎖定且非唯一時可刪) */}
+                                            {/* 刪除按鈕 */}
                                             {item.type !== 'group' && (
                                                 <button 
                                                     onClick={() => removeAsset(item.id)}
@@ -326,7 +349,8 @@
                                     <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1 mb-3">配置監控儀表板</h2>
                                     <div className="grid grid-cols-1 gap-3">
                                         {report.data.map((data) => {
-                                            const diffPercent = (data.currentRatio - data.targetRatio) * 100;
+                                            // 修正: 這裡改用 finalTargetRatio 來計算，避免 NaN
+                                            const diffPercent = (data.currentRatio - data.finalTargetRatio) * 100;
                                             const isBalanced = Math.abs(diffPercent) < 1;
                                             const isHigher = diffPercent >= 0;
                                             
@@ -335,7 +359,7 @@
                                             
                                             if (data.isLockedPreventSell) {
                                                 statusColor = 'bg-amber-500/10 border-amber-500/30 text-amber-400';
-                                                statusText = '🔒 鎖定中 (超標不賣)';
+                                                statusText = '🔒 鎖定超標 (資金排除)';
                                             } else {
                                                 statusColor = isBalanced ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : (isHigher ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400');
                                                 statusText = isBalanced ? '● 完美平衡' : (isHigher ? `▲ 高出 ${Math.abs(diffPercent).toFixed(1)}%` : `▼ 低於 ${Math.abs(diffPercent).toFixed(1)}%`);
@@ -348,7 +372,7 @@
                                                             <span className="text-xl">{data.theme.icon}</span>
                                                             <div>
                                                                 <span className="text-xs font-bold text-slate-300 block">{data.label}</span>
-                                                                <span className="text-[10px] text-slate-500 font-mono">目標: {data.target}%</span>
+                                                                <span className="text-[10px] text-slate-500 font-mono">設定目標: {data.target}%</span>
                                                             </div>
                                                         </div>
                                                         <div className={`text-[10px] font-bold px-2 py-1 rounded-md border ${statusColor}`}>
@@ -361,9 +385,18 @@
                                                             <div className="text-[10px] text-slate-500 mb-0.5">
                                                                 {data.type === 'group' ? '群組總市值 / 實際佔比' : '目前市值 / 實際佔比'}
                                                             </div>
-                                                            <div className="flex items-baseline gap-2">
+                                                            <div className="flex items-center gap-2">
                                                                 <span className="text-xl font-black text-white">${Math.round(data.currentVal).toLocaleString()}</span>
-                                                                <span className="text-xs font-bold text-slate-400">{(data.currentRatio * 100).toFixed(1)}%</span>
+                                                                
+                                                                {/* 修改：顯示實際佔比與動態目標配比 */}
+                                                                <div className="flex flex-col items-start leading-none">
+                                                                    <span className={`text-sm font-bold ${(data.currentRatio < data.finalTargetRatio) ? 'text-rose-400' : 'text-slate-400'}`}>
+                                                                        {(data.currentRatio * 100).toFixed(1)}%
+                                                                    </span>
+                                                                    <span className="text-[9px] text-slate-600 font-mono">
+                                                                        / {(data.finalTargetRatio * 100).toFixed(1)}%
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -393,11 +426,14 @@
                                                         <span className="text-slate-200 text-sm font-bold leading-relaxed">{act}</span>
                                                     </div>
                                                 ))}
+                                                <div className="text-[10px] text-slate-500 mt-4 pt-2 border-t border-slate-700 text-center">
+                                                    註：總買入金額 ≈ 總賣出金額 (封閉系統)
+                                                </div>
                                             </div>
                                         ) : (
                                             <div className="text-center py-4">
                                                 <div className="text-3xl mb-2">✨</div>
-                                                <p className="text-indigo-300 font-bold text-sm">配置平衡 (或已鎖定)，維持現狀</p>
+                                                <p className="text-indigo-300 font-bold text-sm">配置完美，維持現狀</p>
                                             </div>
                                         )}
                                     </div>
@@ -418,7 +454,7 @@
                                                     <div className="flex flex-col items-end">
                                                         <div className="flex items-baseline gap-2">
                                                             <span className="font-mono font-bold text-white">${Math.round(data.targetAmount).toLocaleString()}</span>
-                                                            <span className="text-xs font-bold text-slate-500">{data.target}%</span>
+                                                            <span className="text-xs font-bold text-slate-500">{(data.finalTargetRatio * 100).toFixed(1)}%</span>
                                                         </div>
                                                         
                                                         {/* 調整金額 */}
@@ -453,10 +489,10 @@
 
                     <footer className="mt-8 text-center px-4 pb-8">
                         <div className="w-12 h-1 bg-slate-800 mx-auto rounded-full mb-4"></div>
-                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2">442 Aggressive Strategy</p>
+                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2">Closed System Tool</p>
                         <p className="text-[9px] text-slate-700 leading-relaxed font-bold">
-                            點擊 🔓 可切換資產鎖定狀態<br/>
-                            鎖定時，即使超標也不會建議賣出
+                            鎖定超標資產時，剩餘資金將自動分配<br/>
+                            無需投入額外資金即可完成再平衡
                         </p>
                     </footer>
                 </div>
