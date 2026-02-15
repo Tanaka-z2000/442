@@ -11,20 +11,10 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
-        /* 手機輸入優化 */
-        input[type="number"] {
-            font-size: 16px !important; 
-        }
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-            animation: fadeIn 0.4s ease-out forwards;
-        }
+        input[type="number"] { font-size: 16px !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white">
@@ -33,89 +23,173 @@
     <script type="text/babel">
         const { useState, useMemo } = React;
 
+        // 預設顏色庫
+        const COLORS = [
+            { icon: '💎', color: 'text-blue-400', border: 'focus-within:border-blue-500', bg: 'bg-blue-500' },
+            { icon: '⚡', color: 'text-amber-400', border: 'focus-within:border-amber-500', bg: 'bg-amber-500' },
+            { icon: '🛡️', color: 'text-emerald-400', border: 'focus-within:border-emerald-500', bg: 'bg-emerald-500' },
+            { icon: '🚀', color: 'text-purple-400', border: 'focus-within:border-purple-500', bg: 'bg-purple-500' },
+            { icon: '🌟', color: 'text-pink-400', border: 'focus-within:border-pink-500', bg: 'bg-pink-500' },
+            { icon: '🌊', color: 'text-cyan-400', border: 'focus-within:border-cyan-500', bg: 'bg-cyan-500' },
+        ];
+
         const App = () => {
-            const [values, setValues] = useState({
-                v662: '',
-                v631L: '',
-                cash: ''
-            });
+            // 初始化資產列表 (預設為 442 進攻型配置)
+            const [assets, setAssets] = useState([
+                { 
+                    id: 1, type: 'single', label: '00662 (核心)', value: '', target: 40, theme: COLORS[0], locked: true 
+                },
+                { 
+                    id: 2, type: 'single', label: '00631L (槓桿)', value: '', target: 40, theme: COLORS[1], locked: false 
+                },
+                { 
+                    id: 3, type: 'group', label: '防禦部位 (共用佔比)', target: 20, theme: COLORS[2], locked: false,
+                    subAssets: [
+                        { id: 's1', label: '現金/活存', value: '' },
+                        { id: 's2', label: '類現金 (00865B)', value: '' }
+                    ]
+                }
+            ]);
 
-            // 定義 442 配置目標
-            const TARGETS = {
-                t662: 0.40,
-                t631L: 0.40,
-                cash: 0.20
+            // 新增一般標的
+            const addAsset = () => {
+                const newId = Date.now();
+                const themeIndex = (assets.length) % COLORS.length;
+                setAssets([...assets, {
+                    id: newId,
+                    type: 'single',
+                    label: '新投資標的',
+                    value: '',
+                    target: 0,
+                    theme: COLORS[themeIndex],
+                    locked: false
+                }]);
             };
 
-            const handleInputChange = (e) => {
-                const { name, value } = e.target;
-                setValues(prev => ({ ...prev, [name]: value }));
+            // 刪除標的
+            const removeAsset = (id) => {
+                if (assets.length <= 1) return;
+                setAssets(assets.filter(a => a.id !== id));
             };
 
+            // 切換鎖定狀態
+            const toggleLock = (id) => {
+                setAssets(assets.map(a => a.id === id ? { ...a, locked: !a.locked } : a));
+            };
+
+            // 更新一般標的或群組目標
+            const updateAsset = (id, field, val) => {
+                setAssets(assets.map(a => a.id === id ? { ...a, [field]: val } : a));
+            };
+
+            // 更新群組內的子標的
+            const updateSubAsset = (parentId, subId, field, val) => {
+                setAssets(assets.map(a => {
+                    if (a.id !== parentId) return a;
+                    return {
+                        ...a,
+                        subAssets: a.subAssets.map(s => s.id === subId ? { ...s, [field]: val } : s)
+                    };
+                }));
+            };
+
+            // 計算核心邏輯
             const report = useMemo(() => {
-                const v662 = parseFloat(values.v662) || 0;
-                const v631L = parseFloat(values.v631L) || 0;
-                const cash = parseFloat(values.cash) || 0;
-                
-                const totalWealth = v662 + v631L + cash;
-                if (totalWealth <= 0) return null;
+                // 1. 計算總資產
+                let totalWealth = 0;
+                assets.forEach(a => {
+                    if (a.type === 'single') {
+                        totalWealth += (parseFloat(a.value) || 0);
+                    } else {
+                        a.subAssets.forEach(s => {
+                            totalWealth += (parseFloat(s.value) || 0);
+                        });
+                    }
+                });
 
-                const currentRatios = {
-                    '00662': { ratio: v662 / totalWealth, amount: v662 },
-                    '00631L': { ratio: v631L / totalWealth, amount: v631L },
-                    'cash': { ratio: cash / totalWealth, amount: cash }
-                };
+                // 2. 計算總目標比例
+                const totalTargetRatio = assets.reduce((sum, a) => sum + (parseFloat(a.target) || 0), 0);
+                const isRatioValid = Math.abs(totalTargetRatio - 100) < 0.1;
 
-                // 核心邏輯：00662 只增不減 (Core Lock)
-                const targetV662Base = totalWealth * TARGETS.t662;
-                const finalV662 = Math.max(v662, targetV662Base); 
-                
-                // 剩餘資金分配給流動性標的 (00631L, Cash)
-                // 權重分配：0.4 vs 0.2 (即 2:1)
-                const remainingWealth = totalWealth - finalV662;
-                const liquidWeightTotal = TARGETS.t631L + TARGETS.cash; // 0.6
-                
-                const final631L = remainingWealth * (TARGETS.t631L / liquidWeightTotal);
-                const finalCash = remainingWealth * (TARGETS.cash / liquidWeightTotal);
+                if (totalWealth <= 0) return { isValid: isRatioValid, totalTargetRatio, totalWealth, data: [], actions: [] };
 
-                const post = {
-                    v662: { ratio: finalV662 / totalWealth, amount: finalV662, diff: finalV662 - v662 },
-                    v631L: { ratio: final631L / totalWealth, amount: final631L, diff: final631L - v631L },
-                    cash: { ratio: finalCash / totalWealth, amount: finalCash, diff: finalCash - cash }
-                };
+                // 3. 計算每個項目的數據
+                const data = assets.map(asset => {
+                    let currentVal = 0;
+                    if (asset.type === 'single') {
+                        currentVal = parseFloat(asset.value) || 0;
+                    } else {
+                        currentVal = asset.subAssets.reduce((sum, s) => sum + (parseFloat(s.value) || 0), 0);
+                    }
 
-                // 建議路徑排序：先賣後買
+                    const targetRatio = (parseFloat(asset.target) || 0) / 100;
+                    const targetAmount = totalWealth * targetRatio;
+                    let diff = targetAmount - currentVal;
+                    let isLockedPreventSell = false;
+
+                    // *** 鎖定邏輯 ***
+                    // 如果已鎖定(locked=true) 且 應調整金額為負(diff < 0, 即建議賣出)
+                    // 則強制不賣出 (diff = 0)
+                    if (asset.locked && diff < 0) {
+                        diff = 0;
+                        isLockedPreventSell = true;
+                    }
+                    
+                    return {
+                        ...asset,
+                        currentVal,
+                        currentRatio: currentVal / totalWealth,
+                        targetRatio,
+                        targetAmount,
+                        diff,
+                        isLockedPreventSell
+                    };
+                });
+
+                // 4. 產生建議路徑 (先賣後買)
                 let actions = [];
                 const sellActions = [];
                 const buyActions = [];
 
-                if (post.v631L.diff < -1) sellActions.push(`賣出 00631L：$${Math.abs(Math.round(post.v631L.diff)).toLocaleString()}`);
-                if (post.cash.diff < -1) sellActions.push(`提領現金：$${Math.abs(Math.round(post.cash.diff)).toLocaleString()}`);
-
-                if (post.v662.diff > 1) buyActions.push(`買入 00662：$${Math.round(post.v662.diff).toLocaleString()}`);
-                if (post.v631L.diff > 1) buyActions.push(`買入 00631L：$${Math.round(post.v631L.diff).toLocaleString()}`);
-                if (post.cash.diff > 1) buyActions.push(`留存現金：$${Math.round(post.cash.diff).toLocaleString()}`);
+                data.forEach(info => {
+                    const subject = info.type === 'group' ? `${info.label} (總和)` : info.label;
+                    
+                    if (info.isLockedPreventSell) {
+                        // 鎖定不賣出，不產生動作，但可以在介面上顯示狀態
+                    } else if (info.diff < -1) {
+                        const amount = Math.abs(Math.round(info.diff)).toLocaleString();
+                        sellActions.push(`賣出/提領 ${subject}：$${amount}`);
+                    } else if (info.diff > 1) {
+                        const amount = Math.round(info.diff).toLocaleString();
+                        buyActions.push(`買入/存入 ${subject}：$${amount}`);
+                    }
+                });
 
                 actions = [...sellActions, ...buyActions];
-                return { totalWealth, currentRatios, actions, post };
-            }, [values]);
+
+                return { 
+                    isValid: isRatioValid, 
+                    totalTargetRatio, 
+                    totalWealth, 
+                    data, 
+                    actions 
+                };
+            }, [assets]);
 
             return (
-                <div className="min-h-screen pb-12">
+                <div className="min-h-screen pb-20">
                     {/* Header */}
                     <header className="bg-slate-800/80 backdrop-blur-md border-b border-slate-700 sticky top-0 z-20 px-4 py-4 flex items-center justify-between shadow-lg">
                         <div className="flex items-center gap-3">
                             <div className="bg-gradient-to-br from-amber-500 to-orange-600 text-white w-10 h-10 rounded-xl flex flex-col items-center justify-center font-black text-[10px] shadow-lg border border-white/10 leading-none">
-                                <span>40</span>
-                                <span className="w-full h-px bg-white/30 my-0.5"></span>
-                                <span>40.20</span>
+                                442
                             </div>
                             <div>
-                                <h1 className="text-lg font-bold text-white tracking-tight">442 再平衡</h1>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Aggressive Allocation</p>
+                                <h1 className="text-lg font-bold text-white tracking-tight">進攻型再平衡</h1>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">40/40/20 Strategy</p>
                             </div>
                         </div>
-                        {report && (
+                        {report.totalWealth > 0 && (
                             <div className="text-right animate-fade-in">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">Total Assets</p>
                                 <p className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400">${Math.round(report.totalWealth).toLocaleString()}</p>
@@ -124,85 +198,182 @@
                     </header>
 
                     <main className="px-4 py-6 space-y-8 max-w-md mx-auto">
-                        {/* Input Section */}
+                        
+                        {/* 資產設定區 */}
                         <section className="space-y-4">
                             <div className="flex justify-between items-end px-1">
-                                <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">資產現況</h2>
+                                <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest">投資組合配置</h2>
+                                <span className={`text-[10px] px-2 py-1 rounded-full border transition-all duration-300 ${report.isValid ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : 'text-rose-400 border-rose-500/50 bg-rose-500/10 animate-pulse'}`}>
+                                    總比例: {report.totalTargetRatio}% {report.isValid ? '✅' : '(需為 100%)'}
+                                </span>
                             </div>
                             
-                            <div className="space-y-3">
-                                {/* 00662 Input */}
-                                <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500/50 transition-all">
-                                    <label className="block text-[10px] font-bold text-blue-400 mb-1 opacity-90 uppercase tracking-wide">💎 00662 美股核心 (40%)</label>
-                                    <input 
-                                        type="number" name="v662" value={values.v662} onChange={handleInputChange} placeholder="0" 
-                                        className="w-full bg-transparent border-none outline-none font-black text-2xl text-white placeholder:text-slate-600"
-                                    />
-                                </div>
+                            <div className="space-y-4">
+                                {assets.map((item) => (
+                                    <div key={item.id} className={`bg-slate-800 rounded-2xl border shadow-sm relative group overflow-hidden transition-all ${item.locked ? 'border-amber-500/50 shadow-amber-900/20' : 'border-slate-700'} ${item.type === 'group' && !item.locked ? 'border-l-4 border-l-emerald-500' : ''}`}>
+                                        
+                                        {/* 標題與工具列 */}
+                                        <div className="p-3 flex items-center gap-3 bg-slate-800/50 border-b border-slate-700/50 relative">
+                                            
+                                            {/* 鎖定按鈕 */}
+                                            <button 
+                                                onClick={() => toggleLock(item.id)}
+                                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${item.locked ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+                                                title={item.locked ? "已鎖定 (不賣出)" : "點擊鎖定"}
+                                            >
+                                                {item.locked ? '🔒' : '🔓'}
+                                            </button>
 
-                                <div className="grid grid-cols-2 gap-3">
-                                    {/* 00631L Input */}
-                                    <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm focus-within:border-amber-500 focus-within:ring-1 focus-within:ring-amber-500/50 transition-all">
-                                        <label className="block text-[10px] font-bold text-amber-400 mb-1 opacity-90 uppercase tracking-wide">⚡ 00631L (40%)</label>
-                                        <input 
-                                            type="number" name="v631L" value={values.v631L} onChange={handleInputChange} placeholder="0" 
-                                            className="w-full bg-transparent border-none outline-none font-black text-xl text-white placeholder:text-slate-600"
-                                        />
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-1">
+                                                    <span className="text-sm">{item.theme.icon}</span>
+                                                    <input 
+                                                        type="text" 
+                                                        value={item.label}
+                                                        onChange={(e) => updateAsset(item.id, 'label', e.target.value)}
+                                                        className={`w-full bg-transparent text-[11px] font-bold ${item.theme.color} uppercase tracking-wide outline-none border-b border-transparent focus:border-slate-500 placeholder:text-slate-600`}
+                                                    />
+                                                </div>
+                                                {item.type === 'group' && <p className="text-[9px] text-slate-500 ml-1 mt-0.5">群組共用佔比</p>}
+                                                {item.locked && <span className="text-[9px] text-amber-500 font-bold ml-1">● 只買不賣</span>}
+                                            </div>
+                                            
+                                            {/* 目標 % 輸入 */}
+                                            <div className="w-14 relative">
+                                                <input 
+                                                    type="number" 
+                                                    value={item.target} 
+                                                    onChange={(e) => updateAsset(item.id, 'target', e.target.value)}
+                                                    className="w-full bg-slate-900/80 rounded-lg px-2 py-1 text-center font-bold text-sm text-white border border-slate-600 focus:border-indigo-400 outline-none"
+                                                    placeholder="0"
+                                                />
+                                                <span className="absolute right-1 top-1.5 text-[10px] text-slate-500 pointer-events-none">%</span>
+                                            </div>
+
+                                            {/* 刪除按鈕 (未鎖定且非唯一時可刪) */}
+                                            {item.type !== 'group' && (
+                                                <button 
+                                                    onClick={() => removeAsset(item.id)}
+                                                    className="w-6 h-6 text-slate-600 hover:text-rose-400 transition-colors"
+                                                >✕</button>
+                                            )}
+                                        </div>
+
+                                        {/* 市值輸入區域 */}
+                                        <div className="p-3 space-y-2">
+                                            {item.type === 'single' ? (
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-[10px] text-slate-500 font-bold">目前市值</label>
+                                                    <div className="flex-1 ml-4 relative">
+                                                        <span className="absolute left-0 top-1 text-slate-600 text-lg">$</span>
+                                                        <input 
+                                                            type="number" 
+                                                            value={item.value} 
+                                                            onChange={(e) => updateAsset(item.id, 'value', e.target.value)} 
+                                                            placeholder="0" 
+                                                            className="w-full bg-transparent border-none outline-none font-black text-2xl text-right text-white placeholder:text-slate-700"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                item.subAssets.map(sub => (
+                                                    <div key={sub.id} className="flex items-center justify-between bg-slate-900/30 p-2 rounded-xl border border-slate-700/30">
+                                                        <input 
+                                                            type="text" 
+                                                            value={sub.label}
+                                                            onChange={(e) => updateSubAsset(item.id, sub.id, 'label', e.target.value)}
+                                                            className="bg-transparent text-[10px] font-bold text-slate-400 w-24 outline-none border-b border-transparent focus:border-slate-600 focus:text-slate-300"
+                                                        />
+                                                        <div className="flex-1 ml-2 relative">
+                                                            <span className="absolute left-0 top-0.5 text-slate-600 text-sm">$</span>
+                                                            <input 
+                                                                type="number" 
+                                                                value={sub.value} 
+                                                                onChange={(e) => updateSubAsset(item.id, sub.id, 'value', e.target.value)}
+                                                                placeholder="0" 
+                                                                className="w-full bg-transparent border-none outline-none font-bold text-lg text-right text-white placeholder:text-slate-700"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                        
+                                        {item.type === 'group' && (
+                                            <div className="px-3 pb-2 flex justify-end">
+                                                <p className="text-[9px] text-emerald-500 font-mono">
+                                                    群組總計: ${Math.round(item.subAssets.reduce((sum, s) => sum + (parseFloat(s.value) || 0), 0)).toLocaleString()}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
-                                    {/* Cash Input */}
-                                    <div className="bg-slate-800 p-4 rounded-2xl border border-slate-700 shadow-sm focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
-                                        <label className="block text-[10px] font-bold text-emerald-400 mb-1 opacity-90 uppercase tracking-wide">🛡️ 現金 (20%)</label>
-                                        <input 
-                                            type="number" name="cash" value={values.cash} onChange={handleInputChange} placeholder="0" 
-                                            className="w-full bg-transparent border-none outline-none font-black text-xl text-white placeholder:text-slate-600"
-                                        />
-                                    </div>
-                                </div>
+                                ))}
+
+                                {/* 新增按鈕 */}
+                                <button 
+                                    onClick={addAsset}
+                                    className="w-full py-3 rounded-2xl border-2 border-dashed border-slate-700 text-slate-500 font-bold text-sm hover:border-indigo-500 hover:text-indigo-400 hover:bg-slate-800/50 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <span>＋</span> 新增單一標的
+                                </button>
                             </div>
                         </section>
 
-                        {report ? (
+                        {report.totalWealth > 0 && report.isValid ? (
                             <div className="space-y-8 animate-fade-in">
-                                {/* Current Ratios & Status */}
+                                {/* Dashboard */}
                                 <section>
-                                    <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1 mb-3">配置偏移監控</h2>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {/* 00662 */}
-                                        <div className="col-span-2 bg-slate-800 p-4 rounded-2xl border border-slate-700 flex justify-between items-center relative overflow-hidden group">
-                                            <div className="absolute top-0 right-0 p-2 text-6xl opacity-5">💎</div>
-                                            <div className="relative z-10">
-                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">00662 佔比</span>
-                                                <div className="flex items-baseline gap-2 mt-1">
-                                                    <span className="text-3xl font-black text-white leading-none">{(report.currentRatios['00662'].ratio * 100).toFixed(1)}%</span>
-                                                    <span className="text-xs font-mono text-slate-400 font-bold">${Math.round(report.currentRatios['00662'].amount).toLocaleString()}</span>
-                                                </div>
-                                            </div>
-                                            <div className={`relative z-10 text-[10px] font-bold px-3 py-1.5 rounded-lg border ${((report.currentRatios['00662'].ratio - 0.4)*100) >= 0 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'}`}>
-                                                {((report.currentRatios['00662'].ratio - 0.4)*100) >= 0 ? '▲ 達成 / 超標' : '▼ 不足'}
-                                            </div>
-                                        </div>
-
-                                        {/* 00631L & Cash */}
-                                        {['00631L', 'cash'].map((key) => {
-                                            const target = key === '00631L' ? 0.4 : 0.2;
-                                            const data = report.currentRatios[key];
-                                            const diff = (data.ratio - target) * 100;
-                                            const isBalanced = Math.abs(diff) < 2;
-                                            const isHigher = diff >= 0;
+                                    <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1 mb-3">配置監控儀表板</h2>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {report.data.map((data) => {
+                                            const diffPercent = (data.currentRatio - data.targetRatio) * 100;
+                                            const isBalanced = Math.abs(diffPercent) < 1;
+                                            const isHigher = diffPercent >= 0;
                                             
-                                            let statusColor = isBalanced ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : (isHigher ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border-rose-500/30');
-                                            let statusText = isBalanced ? '● 完美' : (isHigher ? `▲ +${diff.toFixed(1)}%` : `▼ ${diff.toFixed(1)}%`);
+                                            // Status UI
+                                            let statusColor, statusText;
+                                            
+                                            if (data.isLockedPreventSell) {
+                                                statusColor = 'bg-amber-500/10 border-amber-500/30 text-amber-400';
+                                                statusText = '🔒 鎖定中 (超標不賣)';
+                                            } else {
+                                                statusColor = isBalanced ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : (isHigher ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400');
+                                                statusText = isBalanced ? '● 完美平衡' : (isHigher ? `▲ 高出 ${Math.abs(diffPercent).toFixed(1)}%` : `▼ 低於 ${Math.abs(diffPercent).toFixed(1)}%`);
+                                            }
 
                                             return (
-                                                <div key={key} className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex flex-col justify-between aspect-[4/3] relative overflow-hidden">
-                                                    <div className="absolute top-0 right-0 p-2 text-4xl opacity-5">{key === 'cash' ? '🛡️' : '⚡'}</div>
-                                                    <div>
-                                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{key === 'cash' ? '現金' : key}</span>
-                                                        <div className="text-2xl font-black text-white mt-1 leading-none">{(data.ratio * 100).toFixed(1)}%</div>
-                                                        <div className="text-[10px] font-mono text-slate-500 mt-1 font-bold">${Math.round(data.amount).toLocaleString()}</div>
+                                                <div key={data.id} className={`bg-slate-800 p-4 rounded-2xl border shadow-sm relative overflow-hidden ${data.locked ? 'border-amber-500/30' : 'border-slate-700'}`}>
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xl">{data.theme.icon}</span>
+                                                            <div>
+                                                                <span className="text-xs font-bold text-slate-300 block">{data.label}</span>
+                                                                <span className="text-[10px] text-slate-500 font-mono">目標: {data.target}%</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className={`text-[10px] font-bold px-2 py-1 rounded-md border ${statusColor}`}>
+                                                            {statusText}
+                                                        </div>
                                                     </div>
-                                                    <div className={`text-[10px] font-bold px-2 py-1 rounded-md w-fit mt-2 border ${statusColor}`}>
-                                                        {statusText}
+
+                                                    <div className="flex justify-between items-end">
+                                                        <div>
+                                                            <div className="text-[10px] text-slate-500 mb-0.5">
+                                                                {data.type === 'group' ? '群組總市值 / 實際佔比' : '目前市值 / 實際佔比'}
+                                                            </div>
+                                                            <div className="flex items-baseline gap-2">
+                                                                <span className="text-xl font-black text-white">${Math.round(data.currentVal).toLocaleString()}</span>
+                                                                <span className="text-xs font-bold text-slate-400">{(data.currentRatio * 100).toFixed(1)}%</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Bar */}
+                                                    <div className="w-full h-1.5 bg-slate-700 rounded-full mt-3 overflow-hidden">
+                                                        <div 
+                                                            className={`h-full rounded-full transition-all duration-500 ${data.isLockedPreventSell ? 'bg-amber-500' : (isHigher ? 'bg-emerald-500' : 'bg-indigo-500')}`} 
+                                                            style={{ width: `${Math.min(data.currentRatio * 100, 100)}%` }}
+                                                        ></div>
                                                     </div>
                                                 </div>
                                             );
@@ -213,65 +384,54 @@
                                 {/* Action Steps */}
                                 <section>
                                     <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1 mb-3">最佳化路徑 (先賣後買)</h2>
-                                    <div className="bg-gradient-to-b from-amber-900/40 to-slate-900 rounded-3xl p-6 shadow-xl border border-amber-500/30 relative overflow-hidden">
-                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+                                    <div className="bg-gradient-to-b from-indigo-900/40 to-slate-900 rounded-3xl p-6 shadow-xl border border-indigo-500/30">
                                         {report.actions.length > 0 ? (
-                                            <div className="space-y-4 relative z-10">
+                                            <div className="space-y-4">
                                                 {report.actions.map((act, i) => (
                                                     <div key={i} className="flex gap-4 items-start border-b border-white/5 pb-3 last:border-0 last:pb-0">
-                                                        <span className="bg-amber-500/20 text-amber-300 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black mt-0.5 shrink-0 border border-amber-500/30">{i+1}</span>
+                                                        <span className="bg-indigo-500/20 text-indigo-300 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black mt-0.5 shrink-0 border border-indigo-500/30">{i+1}</span>
                                                         <span className="text-slate-200 text-sm font-bold leading-relaxed">{act}</span>
                                                     </div>
                                                 ))}
                                             </div>
                                         ) : (
-                                            <div className="text-center py-6">
-                                                <div className="text-4xl mb-2">✨</div>
-                                                <p className="text-amber-300 font-bold text-sm">完美平衡，維持現狀</p>
+                                            <div className="text-center py-4">
+                                                <div className="text-3xl mb-2">✨</div>
+                                                <p className="text-indigo-300 font-bold text-sm">配置平衡 (或已鎖定)，維持現狀</p>
                                             </div>
                                         )}
                                     </div>
                                 </section>
 
-                                {/* Target Amounts */}
+                                {/* Target Amount Comparison */}
                                 <section>
                                     <h2 className="text-xs font-black text-slate-500 uppercase tracking-widest px-1 mb-3">再平衡後目標市值</h2>
-                                    <div className="space-y-3">
-                                        {Object.entries(report.post).map(([key, data]) => {
-                                            let label, idealTargetRatio;
-                                            switch(key) {
-                                                case 'v662': label = '00662'; idealTargetRatio = TARGETS.t662; break;
-                                                case 'v631L': label = '00631L'; idealTargetRatio = TARGETS.t631L; break;
-                                                case 'cash': label = '現金/債'; idealTargetRatio = TARGETS.cash; break;
-                                            }
-                                            const idealAmount = report.totalWealth * idealTargetRatio;
+                                    <div className="space-y-2">
+                                        {report.data.map((data) => {
                                             const isAdd = data.diff >= 0;
-
                                             return (
-                                                <div key={key} className="bg-slate-800 p-4 rounded-2xl border border-slate-700 flex flex-col gap-2 shadow-sm">
-                                                    <div className="flex justify-between items-center">
-                                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
-                                                        <div className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${isAdd ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}`}>
-                                                            {isAdd ? '+' : '-'} ${Math.abs(Math.round(data.diff)).toLocaleString()}
-                                                        </div>
+                                                <div key={data.id} className="bg-slate-800 px-4 py-3 rounded-xl border border-slate-700 flex justify-between items-center text-sm">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-base">{data.theme.icon}</span>
+                                                        <span className="font-bold text-slate-300 text-xs">{data.label.split(' ')[0]}</span>
                                                     </div>
-                                                    
-                                                    <div className="flex justify-between items-baseline mt-1">
-                                                        <div className="font-mono text-xl font-black text-white tracking-tight">
-                                                            ${Math.round(data.amount).toLocaleString()}
+                                                    <div className="flex flex-col items-end">
+                                                        <div className="flex items-baseline gap-2">
+                                                            <span className="font-mono font-bold text-white">${Math.round(data.targetAmount).toLocaleString()}</span>
+                                                            <span className="text-xs font-bold text-slate-500">{data.target}%</span>
                                                         </div>
-                                                        <div className="text-base font-black text-amber-500">
-                                                            {(data.ratio * 100).toFixed(1)}%
+                                                        
+                                                        {/* 調整金額 */}
+                                                        <div className="flex items-center gap-1 mt-0.5">
+                                                            <span className="text-[9px] text-slate-600 mr-1">調整:</span>
+                                                            {data.isLockedPreventSell ? (
+                                                                <span className="text-[10px] font-bold text-amber-500">🔒 鎖定不賣</span>
+                                                            ) : (
+                                                                <span className={`text-[10px] font-bold ${isAdd ? 'text-indigo-400' : 'text-rose-400'}`}>
+                                                                    {isAdd ? '+' : ''}{Math.round(data.diff).toLocaleString()}
+                                                                </span>
+                                                            )}
                                                         </div>
-                                                    </div>
-                                                    
-                                                    <div className="flex justify-between items-center pt-2 border-t border-slate-700/50 mt-1">
-                                                        <span className="text-[9px] font-mono text-slate-500">
-                                                            (理想值 ${Math.round(idealAmount).toLocaleString()})
-                                                        </span>
-                                                        <span className="text-[9px] text-slate-500 font-bold">
-                                                            理想設定: {idealTargetRatio * 100}%
-                                                        </span>
                                                     </div>
                                                 </div>
                                             );
@@ -281,19 +441,22 @@
                             </div>
                         ) : (
                             <div className="text-center py-24 opacity-30">
-                                <div className="text-6xl mb-4 grayscale filter">⚔️</div>
-                                <p className="font-black text-slate-400">輸入資產數據</p>
-                                <p className="text-xs text-slate-600 mt-2 font-bold">啟動 442 進攻模式</p>
+                                <div className="text-6xl mb-4 grayscale filter">🎛️</div>
+                                {report.isValid ? (
+                                    <p className="font-black text-slate-400">輸入資產與目標比例</p>
+                                ) : (
+                                    <p className="font-black text-rose-400">請調整比例總和至 100%</p>
+                                )}
                             </div>
                         )}
                     </main>
 
                     <footer className="mt-8 text-center px-4 pb-8">
                         <div className="w-12 h-1 bg-slate-800 mx-auto rounded-full mb-4"></div>
-                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2">Aggressive 442 Strategy</p>
+                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] mb-2">442 Aggressive Strategy</p>
                         <p className="text-[9px] text-slate-700 leading-relaxed font-bold">
-                            40% 核心 (00662) | 40% 攻擊 (00631L) | 20% 現金<br/>
-                            高曝險注意．紀律執行
+                            點擊 🔓 可切換資產鎖定狀態<br/>
+                            鎖定時，即使超標也不會建議賣出
                         </p>
                     </footer>
                 </div>
